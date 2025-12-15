@@ -7,13 +7,13 @@ import streamlit as st
 import tensorflow as tf
 
 # ======================================================
-# AVISO IMPORTANTE
+# AVISO LEGAL / ÉTICO
 # ======================================================
 st.warning(
-    "⚠️ ATENÇÃO:\n"
+    "⚠️ AVISO IMPORTANTE:\n"
     "Este sistema é apenas uma DEMONSTRAÇÃO TÉCNICA.\n"
     "Não realiza diagnóstico médico.\n"
-    "Use apenas imagens histológicas compatíveis com o treino."
+    "Os resultados indicam apenas padrões de ativação do modelo."
 )
 
 # ======================================================
@@ -28,7 +28,7 @@ os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
 
 # ======================================================
-# BANCO SQLITE (AUTO / SEGURO)
+# BANCO SQLITE (AUTO)
 # ======================================================
 DB_PATH = os.path.join(BASE_DIR, "images.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -39,25 +39,17 @@ CREATE TABLE IF NOT EXISTS dataset (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     image_path TEXT,
     model_mask_path TEXT,
-    classification TEXT
+    classification TEXT,
+    pattern_analysis TEXT,
+    threshold REAL,
+    activation_mean REAL,
+    activation_max REAL
 )
 """)
 conn.commit()
 
-def ensure_column(table, column, col_type):
-    cursor.execute(f"PRAGMA table_info({table})")
-    cols = [row[1] for row in cursor.fetchall()]
-    if column not in cols:
-        cursor.execute(
-            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
-        )
-        conn.commit()
-
-ensure_column("dataset", "threshold", "REAL")
-ensure_column("dataset", "activation_mean", "REAL")
-
 # ======================================================
-# CARREGAR MODELO
+# MODELO
 # ======================================================
 MODEL_PATH = "modelo_sicapv2_unet.h5"
 
@@ -69,47 +61,59 @@ def load_model():
 
 model = load_model()
 
-st.title("🔬 Segmentação Técnica com U-Net (DEMO)")
+st.title("🔬 Análise Técnica com U-Net (DEMO)")
 
 if model is None:
     st.error("❌ Modelo não encontrado")
     st.stop()
 
-st.success("✅ Modelo carregado")
-
 # ======================================================
 # FUNÇÕES
 # ======================================================
-def is_histology_like(img: Image.Image):
+def is_histology_like(img):
     arr = np.array(img)
     mean_color = arr.mean(axis=(0, 1))
-    # lâminas histológicas tendem a tons rosados/arroxeados
     return mean_color[0] > 120 and mean_color[2] > 120
 
-def run_unet(img: Image.Image):
-    img_resized = img.resize(IMG_SIZE)
-    arr = np.array(img_resized, dtype=np.float32) / 255.0
+def run_unet(img):
+    img = img.resize(IMG_SIZE)
+    arr = np.array(img, dtype=np.float32) / 255.0
     arr = np.expand_dims(arr, axis=0)
     pred = model.predict(arr, verbose=0)[0, :, :, 0]
     return pred
 
-def classify(mask: np.ndarray):
-    ratio = np.sum(mask > 0) / mask.size
-    st.write(f"📊 Proporção segmentada: {ratio:.4f}")
-
-    return (
-        "ativação detectada (modelo técnico, não médico)"
-        if ratio > 0.01
-        else "nenhuma ativação relevante (modelo técnico)"
-    )
-
-def make_overlay(img: Image.Image, mask: np.ndarray):
+def make_overlay(img, mask):
     img = img.resize(IMG_SIZE)
     img_np = np.array(img)
     overlay = img_np.copy()
     overlay[mask > 0] = [255, 0, 0]
-    blended = (0.7 * img_np + 0.3 * overlay).astype(np.uint8)
-    return Image.fromarray(blended)
+    return Image.fromarray((0.7 * img_np + 0.3 * overlay).astype(np.uint8))
+
+# ======================================================
+# CLASSIFICAÇÕES
+# ======================================================
+def technical_presence(mask):
+    ratio = np.sum(mask > 0) / mask.size
+    st.write(f"📊 Proporção segmentada: {ratio:.4f}")
+
+    return (
+        "ativação detectada (técnico)"
+        if ratio > 0.01
+        else "nenhuma ativação relevante (técnico)"
+    )
+
+def pattern_analysis(mask, pred):
+    ratio = np.sum(mask > 0) / mask.size
+    mean_act = pred.mean()
+    max_act = pred.max()
+
+    # 🔬 Heurística técnica
+    if ratio < 0.2 and mean_act > 0.25 and max_act > 0.4:
+        return "padrão de ativação compatível com tecido tumoral (técnico)"
+    elif ratio > 0.6:
+        return "ativação difusa não específica (técnico)"
+    else:
+        return "padrão indefinido / inconclusivo (técnico)"
 
 # ======================================================
 # INTERFACE
@@ -123,52 +127,39 @@ if uploaded_file:
     img = Image.open(uploaded_file).convert("RGB")
     st.image(img, caption="Imagem enviada", use_column_width=True)
 
-    # 🔒 BLOQUEIO DE IMAGEM FORA DO DOMÍNIO
     if not is_histology_like(img):
-        st.error(
-            "❌ Imagem fora do domínio do modelo.\n"
-            "Envie apenas imagens histológicas microscópicas."
-        )
+        st.error("❌ Imagem fora do domínio do modelo.")
         st.stop()
 
-    if st.button("🤖 Rodar IA (U-Net)"):
+    if st.button("🤖 Rodar IA"):
 
         pred = run_unet(img)
 
-        # DEBUG
-        st.subheader("🧪 Debug da saída do modelo")
+        st.subheader("🧪 Debug do Modelo")
         st.json({
             "min": float(pred.min()),
             "max": float(pred.max()),
             "mean": float(pred.mean())
         })
 
-        st.image(
-            (pred * 255).astype(np.uint8),
-            caption="Mapa de probabilidade"
-        )
+        st.image((pred * 255).astype(np.uint8), caption="Mapa de probabilidade")
 
-        # Threshold automático seguro
-        auto_threshold = float(
-            np.clip(pred.mean() + 0.05, 0.2, 0.9)
-        )
-
-        threshold = st.slider(
-            "🎚️ Limiar de segmentação",
-            min_value=0.2,
-            max_value=0.9,
-            value=auto_threshold,
-            step=0.01
-        )
+        threshold = float(np.clip(pred.mean() + 0.05, 0.2, 0.9))
+        st.caption(f"Limiar automático usado: {threshold:.2f}")
 
         mask = (pred > threshold).astype(np.uint8) * 255
         st.image(mask, caption="Máscara binária")
 
         overlay = make_overlay(img, mask)
-        st.image(overlay, caption="Overlay da segmentação")
+        st.image(overlay, caption="Overlay")
 
-        classification = classify(mask)
-        st.info(f"Resultado técnico: **{classification}**")
+        # ===== RESULTADOS =====
+        st.subheader("📘 Resultado Técnico")
+        presence = technical_presence(mask)
+        pattern = pattern_analysis(mask, pred)
+
+        st.info(f"**Presença técnica:** {presence}")
+        st.info(f"**Análise de padrão:** {pattern}")
 
         # SALVAR
         img_name = f"{uuid.uuid4()}_{uploaded_file.name}"
@@ -183,16 +174,20 @@ if uploaded_file:
             image_path,
             model_mask_path,
             classification,
+            pattern_analysis,
             threshold,
-            activation_mean
-        ) VALUES (?, ?, ?, ?, ?)
+            activation_mean,
+            activation_max
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             img_path,
             mask_path,
-            classification,
-            float(threshold),
-            float(pred.mean())
+            presence,
+            pattern,
+            threshold,
+            float(pred.mean()),
+            float(pred.max())
         ))
         conn.commit()
 
-        st.success("✅ Resultado salvo com sucesso")
+        st.success("✅ Análise técnica concluída e salva")
