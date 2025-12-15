@@ -7,13 +7,14 @@ import streamlit as st
 import tensorflow as tf
 
 # ======================================================
-# AVISO LEGAL / ÉTICO
+# AVISO ÉTICO (FORTE E VISÍVEL)
 # ======================================================
-st.warning(
-    "⚠️ AVISO IMPORTANTE:\n"
-    "Este sistema é apenas uma DEMONSTRAÇÃO TÉCNICA.\n"
-    "Não realiza diagnóstico médico.\n"
-    "Os resultados indicam apenas padrões de ativação do modelo."
+st.error(
+    "⚠️ AVISO MUITO IMPORTANTE ⚠️\n\n"
+    "Este sistema é APENAS UM TESTE EXPERIMENTAL.\n"
+    "Ele NÃO realiza diagnóstico médico.\n"
+    "Os resultados exibidos NÃO devem ser usados para decisões reais.\n"
+    "Classificação feita exclusivamente por um modelo de IA."
 )
 
 # ======================================================
@@ -39,8 +40,7 @@ CREATE TABLE IF NOT EXISTS dataset (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     image_path TEXT,
     model_mask_path TEXT,
-    classification TEXT,
-    pattern_analysis TEXT,
+    cancer_result TEXT,
     threshold REAL,
     activation_mean REAL,
     activation_max REAL
@@ -61,7 +61,7 @@ def load_model():
 
 model = load_model()
 
-st.title("🔬 Análise Técnica com U-Net (DEMO)")
+st.title("🧪 Classificação Experimental — IA (DEMO)")
 
 if model is None:
     st.error("❌ Modelo não encontrado")
@@ -79,41 +79,28 @@ def run_unet(img):
     img = img.resize(IMG_SIZE)
     arr = np.array(img, dtype=np.float32) / 255.0
     arr = np.expand_dims(arr, axis=0)
-    pred = model.predict(arr, verbose=0)[0, :, :, 0]
-    return pred
+    return model.predict(arr, verbose=0)[0, :, :, 0]
 
-def make_overlay(img, mask):
+def overlay(img, mask):
     img = img.resize(IMG_SIZE)
     img_np = np.array(img)
-    overlay = img_np.copy()
-    overlay[mask > 0] = [255, 0, 0]
-    return Image.fromarray((0.7 * img_np + 0.3 * overlay).astype(np.uint8))
+    ov = img_np.copy()
+    ov[mask > 0] = [255, 0, 0]
+    return Image.fromarray((0.7 * img_np + 0.3 * ov).astype(np.uint8))
 
 # ======================================================
-# CLASSIFICAÇÕES
+# DECISÃO EXPERIMENTAL (CÂNCER / NÃO CÂNCER)
 # ======================================================
-def technical_presence(mask):
-    ratio = np.sum(mask > 0) / mask.size
-    st.write(f"📊 Proporção segmentada: {ratio:.4f}")
-
-    return (
-        "ativação detectada (técnico)"
-        if ratio > 0.01
-        else "nenhuma ativação relevante (técnico)"
-    )
-
-def pattern_analysis(mask, pred):
+def experimental_cancer_decision(mask, pred):
     ratio = np.sum(mask > 0) / mask.size
     mean_act = pred.mean()
     max_act = pred.max()
 
-    # 🔬 Heurística técnica
-    if ratio < 0.2 and mean_act > 0.25 and max_act > 0.4:
-        return "padrão de ativação compatível com tecido tumoral (técnico)"
-    elif ratio > 0.6:
-        return "ativação difusa não específica (técnico)"
+    # 🔬 REGRA EXPERIMENTAL (NÃO MÉDICA)
+    if ratio < 0.4 and mean_act > 0.22 and max_act > 0.35:
+        return "CÂNCER (resultado experimental do modelo)"
     else:
-        return "padrão indefinido / inconclusivo (técnico)"
+        return "NÃO CÂNCER (resultado experimental do modelo)"
 
 # ======================================================
 # INTERFACE
@@ -131,7 +118,7 @@ if uploaded_file:
         st.error("❌ Imagem fora do domínio do modelo.")
         st.stop()
 
-    if st.button("🤖 Rodar IA"):
+    if st.button("🤖 Rodar IA (EXPERIMENTAL)"):
 
         pred = run_unet(img)
 
@@ -142,24 +129,20 @@ if uploaded_file:
             "mean": float(pred.mean())
         })
 
-        st.image((pred * 255).astype(np.uint8), caption="Mapa de probabilidade")
-
         threshold = float(np.clip(pred.mean() + 0.05, 0.2, 0.9))
-        st.caption(f"Limiar automático usado: {threshold:.2f}")
-
         mask = (pred > threshold).astype(np.uint8) * 255
-        st.image(mask, caption="Máscara binária")
 
-        overlay = make_overlay(img, mask)
-        st.image(overlay, caption="Overlay")
+        st.image(mask, caption="Máscara gerada")
+        st.image(overlay(img, mask), caption="Overlay")
 
-        # ===== RESULTADOS =====
-        st.subheader("📘 Resultado Técnico")
-        presence = technical_presence(mask)
-        pattern = pattern_analysis(mask, pred)
+        # ===== RESULTADO FINAL =====
+        st.subheader("🔴 Resultado do Modelo (EXPERIMENTAL)")
+        cancer_result = experimental_cancer_decision(mask, pred)
 
-        st.info(f"**Presença técnica:** {presence}")
-        st.info(f"**Análise de padrão:** {pattern}")
+        if "CÂNCER" in cancer_result:
+            st.error(cancer_result)
+        else:
+            st.success(cancer_result)
 
         # SALVAR
         img_name = f"{uuid.uuid4()}_{uploaded_file.name}"
@@ -173,21 +156,19 @@ if uploaded_file:
         INSERT INTO dataset (
             image_path,
             model_mask_path,
-            classification,
-            pattern_analysis,
+            cancer_result,
             threshold,
             activation_mean,
             activation_max
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """, (
             img_path,
             mask_path,
-            presence,
-            pattern,
+            cancer_result,
             threshold,
             float(pred.mean()),
             float(pred.max())
         ))
         conn.commit()
 
-        st.success("✅ Análise técnica concluída e salva")
+        st.success("✅ Análise experimental concluída")
