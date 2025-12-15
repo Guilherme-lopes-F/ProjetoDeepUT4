@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import uuid
 import numpy as np
 from PIL import Image
 import streamlit as st
 import tensorflow as tf
 
 # ======================================================
-# 1. Criar diretórios automaticamente
+# 1. Diretórios
 # ======================================================
 BASE_DIR = "data"
 IMG_DIR = os.path.join(BASE_DIR, "images")
@@ -16,7 +17,7 @@ os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
 
 # ======================================================
-# 2. Conectar SQLite
+# 2. Banco SQLite
 # ======================================================
 DB_PATH = os.path.join(BASE_DIR, "images.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -25,7 +26,7 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS dataset (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    image_path TEXT NOT NULL,
+    image_path TEXT,
     mask_path TEXT,
     model_mask_path TEXT,
     classification TEXT
@@ -34,132 +35,100 @@ CREATE TABLE IF NOT EXISTS dataset (
 conn.commit()
 
 # ======================================================
-# 3. Carregar modelo U-Net
+# 3. Carregar modelo
 # ======================================================
 MODEL_PATH = "modelo_sicapv2_unet.h5"
 model = None
+
 if os.path.exists(MODEL_PATH):
     model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-    st.success(f"Modelo carregado de: {MODEL_PATH}")
+    st.success("Modelo U-Net carregado com sucesso")
 else:
-    st.warning("⚠️ Modelo não encontrado: modelo_sicapv2_unet.h5")
+    st.error("Modelo não encontrado")
 
 # ======================================================
-# 4. Função: máscara por claridade
+# 4. Segmentação com U-Net (CORRIGIDA)
 # ======================================================
-def create_brightness_mask(img: Image.Image):
-    gray = img.convert("L")
-    arr = np.array(gray)
-    threshold = arr.mean()
-    mask = (arr > threshold).astype(np.uint8) * 255
+def run_unet_segmentation(img: Image.Image, model):
+    if model is None:
+        return None
+
+    # ✅ Forçar tamanho do treino
+    img_resized = img.resize((256, 256))
+
+    # ✅ Normalização correta
+    arr = np.array(img_resized, dtype=np.float32) / 255.0
+    arr = np.expand_dims(arr, axis=0)
+
+    # Predição
+    pred = model.predict(arr, verbose=0)[0, :, :, 0]
+
+    # ✅ Limiar padrão
+    mask = (pred > 0.5).astype(np.uint8) * 255
+
     return Image.fromarray(mask)
 
 # ======================================================
-# 5. Função: prever máscara usando U-Net
-# ======================================================
-def run_unet_segmentation(img: Image.Image, model, target_size=(256, 256)):
-    if model is None:
-        st.error("⚠️ Modelo não carregado. Não é possível realizar a segmentação.")
-        return None
-
-    # Verifique se target_size é uma tupla
-    if not isinstance(target_size, tuple) or len(target_size) != 2:
-        st.error("⚠️ target_size deve ser uma tupla com dois elementos (largura, altura).")
-        return None
-
-    # Redimensionar a imagem e normalizar
-    img_resized = img.resize(target_size)
-    arr = np.array(img_resized) / 255.0
-    arr = np.expand_dims(arr, axis=0)  # Adiciona a dimensão batch
-
-    # Prever a máscara
-    pred = model.predict(arr)[0]
-    
-    # Limiar para binarizar a saída
-    pred_mask = (pred[:, :, 0] > 0.5).astype(np.uint8) * 255
-
-    # Retornar a imagem binarizada
-    return Image.fromarray(pred_mask)
-
-# ======================================================
-# 6. Classificação técnica: “provável presença” / “provável ausência”
+# 5. Classificação técnica (CORRIGIDA)
 # ======================================================
 def classify_mask(mask_img: Image.Image):
     arr = np.array(mask_img)
-    
-    # Contar pixels com valor maior que 0 (indicando presença de área segmentada)
     tumor_pixels = np.sum(arr > 0)
+    total_pixels = arr.size
 
-    # Visualizar o número de pixels "ativos" na máscara
-    st.write(f"Pixels com valor maior que 0 (indicação de tumor): {tumor_pixels}")
+    ratio = tumor_pixels / total_pixels
+    st.write(f"Proporção segmentada: {ratio:.4f}")
 
-    # Ajustar o limiar com base na quantidade de pixels
-    return "provável presença (técnico)" if tumor_pixels > 100 else "provável ausência (técnico)"
+    return (
+        "provável presença (técnico)"
+        if ratio > 0.01
+        else "provável ausência (técnico)"
+    )
 
 # ======================================================
-# 7. Interface Streamlit
+# 6. Interface Streamlit
 # ======================================================
 st.title("🔬 Análise Técnica de Imagens — SICAPv2 (DEMO)")
 
-# Upload da imagem
-uploaded_file = st.file_uploader("Envie uma imagem (JPG/PNG)", type=["jpg","jpeg","png"])
+uploaded_file = st.file_uploader(
+    "Envie uma imagem (JPG/PNG)",
+    type=["jpg", "jpeg", "png"]
+)
 
-if uploaded_file:
+if uploaded_file and model:
     img = Image.open(uploaded_file).convert("RGB")
     st.image(img, caption="Imagem enviada", use_column_width=True)
 
-    img_name = uploaded_file.name
+    # ✅ Evita sobrescrever arquivos
+    img_name = f"{uuid.uuid4()}_{uploaded_file.name}"
     img_path = os.path.join(IMG_DIR, img_name)
     img.save(img_path)
 
-    # Salvar no banco de dados
-    cursor.execute("INSERT INTO dataset (image_path) VALUES (?)", (img_path,))
-    conn.commit()
+    if st.button("🤖 Rodar IA (U-Net)"):
 
-    # Criar máscara por claridade
-    st.subheader("🧪 Criar máscara por claridade")
-    if st.button("Gerar máscara por claridade"):
-        brightness_mask = create_brightness_mask(img)
-        mask_path = os.path.join(MASK_DIR, f"brightness_{img_name}")
-        brightness_mask.save(mask_path)
+        pred_mask = run_unet_segmentation(img, model)
 
-        cursor.execute("UPDATE dataset SET mask_path = ? WHERE image_path = ?", (mask_path, img_path))
-        conn.commit()
+        if pred_mask:
+            mask_name = f"mask_{img_name}"
+            model_mask_path = os.path.join(MASK_DIR, mask_name)
+            pred_mask.save(model_mask_path)
 
-        st.success("Máscara criada!")
-        st.image(brightness_mask, caption="Máscara por claridade", use_column_width=True)
+            classification = classify_mask(pred_mask)
 
-    # Rodar modelo U-Net
-    st.subheader("🤖 Rodar Segmentação com a U-Net")
+            # Salvar tudo no banco
+            cursor.execute("""
+            INSERT INTO dataset (image_path, model_mask_path, classification)
+            VALUES (?, ?, ?)
+            """, (img_path, model_mask_path, classification))
+            conn.commit()
 
-    if st.button("Rodar IA (U-Net)"):
+            st.success("Segmentação concluída")
+            st.image(pred_mask, caption="Máscara gerada pela IA")
 
-        if model is None:
-            st.error("⚠️ Modelo não carregado. Não é possível realizar a segmentação.")
-        else:
-            pred_mask = run_unet_segmentation(img, model)
+            st.info(f"Resultado técnico: **{classification}**")
 
-            if pred_mask:
-                model_mask_path = os.path.join(MASK_DIR, f"modelmask_{img_name}")
-                pred_mask.save(model_mask_path)
-
-                cursor.execute("UPDATE dataset SET model_mask_path = ? WHERE image_path = ?", (model_mask_path, img_path))
-                conn.commit()
-
-                st.success("Segmentação gerada!")
-                st.image(pred_mask, caption="Segmentação da IA (não médica)")
-
-                # Classificação técnica
-                st.subheader("📘 Classificação Técnica (NÃO MÉDICA)")
-                classification = classify_mask(pred_mask)
-
-                cursor.execute("UPDATE dataset SET classification = ? WHERE image_path = ?", (classification, img_path))
-                conn.commit()
-
-                st.info(f"Resultado técnico: **{classification}**")
-
-# Treinamento do modelo (opcional)
-st.subheader("⚙️ Treinamento do Modelo U-Net (Opcional)")
-
-if st.button("🚀 Treinar Modelo U-Net"):
-    st.warning("Esta opção está desativada por enquanto. O modelo carregado será utilizado para segmentação.")
+# ======================================================
+# 7. Treino (desativado)
+# ======================================================
+st.subheader("⚙️ Treinamento do Modelo")
+st.warning("Treinamento desativado nesta versão.")
