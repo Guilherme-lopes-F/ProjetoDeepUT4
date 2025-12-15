@@ -7,6 +7,16 @@ import streamlit as st
 import tensorflow as tf
 
 # ======================================================
+# AVISO IMPORTANTE
+# ======================================================
+st.warning(
+    "⚠️ ATENÇÃO:\n"
+    "Este sistema é apenas uma DEMONSTRAÇÃO TÉCNICA.\n"
+    "Não realiza diagnóstico médico.\n"
+    "Use apenas imagens histológicas compatíveis com o treino."
+)
+
+# ======================================================
 # CONFIGURAÇÕES
 # ======================================================
 IMG_SIZE = (256, 256)
@@ -18,13 +28,12 @@ os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
 
 # ======================================================
-# BANCO SQLITE (AUTO / SEGURO PARA GITHUB + STREAMLIT)
+# BANCO SQLITE (AUTO / SEGURO)
 # ======================================================
 DB_PATH = os.path.join(BASE_DIR, "images.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
-# Tabela base
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS dataset (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +44,6 @@ CREATE TABLE IF NOT EXISTS dataset (
 """)
 conn.commit()
 
-# Função para garantir colunas (migração segura)
 def ensure_column(table, column, col_type):
     cursor.execute(f"PRAGMA table_info({table})")
     cols = [row[1] for row in cursor.fetchall()]
@@ -45,7 +53,6 @@ def ensure_column(table, column, col_type):
         )
         conn.commit()
 
-# Colunas extras
 ensure_column("dataset", "threshold", "REAL")
 ensure_column("dataset", "activation_mean", "REAL")
 
@@ -62,17 +69,23 @@ def load_model():
 
 model = load_model()
 
-st.title("🔬 Análise Técnica de Segmentação — U-Net (DEMO)")
+st.title("🔬 Segmentação Técnica com U-Net (DEMO)")
 
 if model is None:
-    st.error("❌ Modelo U-Net não encontrado")
+    st.error("❌ Modelo não encontrado")
     st.stop()
 
-st.success("✅ Modelo carregado com sucesso")
+st.success("✅ Modelo carregado")
 
 # ======================================================
 # FUNÇÕES
 # ======================================================
+def is_histology_like(img: Image.Image):
+    arr = np.array(img)
+    mean_color = arr.mean(axis=(0, 1))
+    # lâminas histológicas tendem a tons rosados/arroxeados
+    return mean_color[0] > 120 and mean_color[2] > 120
+
 def run_unet(img: Image.Image):
     img_resized = img.resize(IMG_SIZE)
     arr = np.array(img_resized, dtype=np.float32) / 255.0
@@ -83,10 +96,11 @@ def run_unet(img: Image.Image):
 def classify(mask: np.ndarray):
     ratio = np.sum(mask > 0) / mask.size
     st.write(f"📊 Proporção segmentada: {ratio:.4f}")
+
     return (
-        "provável presença (técnico)"
+        "ativação detectada (modelo técnico, não médico)"
         if ratio > 0.01
-        else "provável ausência (técnico)"
+        else "nenhuma ativação relevante (modelo técnico)"
     )
 
 def make_overlay(img: Image.Image, mask: np.ndarray):
@@ -101,19 +115,27 @@ def make_overlay(img: Image.Image, mask: np.ndarray):
 # INTERFACE
 # ======================================================
 uploaded_file = st.file_uploader(
-    "Envie uma imagem (PNG / JPG)",
+    "Envie uma imagem HISTOLÓGICA (PNG / JPG)",
     type=["png", "jpg", "jpeg"]
 )
 
 if uploaded_file:
     img = Image.open(uploaded_file).convert("RGB")
-    st.image(img, caption="Imagem original", use_column_width=True)
+    st.image(img, caption="Imagem enviada", use_column_width=True)
+
+    # 🔒 BLOQUEIO DE IMAGEM FORA DO DOMÍNIO
+    if not is_histology_like(img):
+        st.error(
+            "❌ Imagem fora do domínio do modelo.\n"
+            "Envie apenas imagens histológicas microscópicas."
+        )
+        st.stop()
 
     if st.button("🤖 Rodar IA (U-Net)"):
 
         pred = run_unet(img)
 
-        # Debug
+        # DEBUG
         st.subheader("🧪 Debug da saída do modelo")
         st.json({
             "min": float(pred.min()),
@@ -140,7 +162,6 @@ if uploaded_file:
         )
 
         mask = (pred > threshold).astype(np.uint8) * 255
-
         st.image(mask, caption="Máscara binária")
 
         overlay = make_overlay(img, mask)
@@ -149,7 +170,7 @@ if uploaded_file:
         classification = classify(mask)
         st.info(f"Resultado técnico: **{classification}**")
 
-        # Salvar arquivos
+        # SALVAR
         img_name = f"{uuid.uuid4()}_{uploaded_file.name}"
         img_path = os.path.join(IMG_DIR, img_name)
         mask_path = os.path.join(MASK_DIR, f"mask_{img_name}")
@@ -157,7 +178,6 @@ if uploaded_file:
         img.save(img_path)
         Image.fromarray(mask).save(mask_path)
 
-        # Inserir no banco (NÃO QUEBRA)
         cursor.execute("""
         INSERT INTO dataset (
             image_path,
