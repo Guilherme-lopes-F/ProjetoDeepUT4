@@ -57,9 +57,14 @@ def create_brightness_mask(img: Image.Image):
 # ======================================================
 # 5. Função: prever máscara usando U-Net
 # ======================================================
-def run_unet_segmentation(img: Image.Image, target_size=(256, 256)):
+def run_unet_segmentation(img: Image.Image, model, target_size=(256, 256)):
     if model is None:
         st.error("⚠️ Modelo não carregado. Não é possível realizar a segmentação.")
+        return None
+
+    # Verifique se target_size é uma tupla
+    if not isinstance(target_size, tuple) or len(target_size) != 2:
+        st.error("⚠️ target_size deve ser uma tupla com dois elementos (largura, altura).")
         return None
 
     # Redimensionar a imagem e normalizar
@@ -153,5 +158,8 @@ if uploaded_file:
 
                 st.info(f"Resultado técnico: **{classification}**")
 
+# Treinamento do modelo (opcional)
+st.subheader("⚙️ Treinamento do Modelo U-Net (Opcional)")
 
-
+if st.button("🚀 Treinar Modelo U-Net"):
+    st.warning("Esta opção está desativada por enquanto. O modelo carregado será utilizado para segmentação.")
