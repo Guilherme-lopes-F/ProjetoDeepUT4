@@ -85,8 +85,10 @@ def classify_mask(mask_img: Image.Image):
     arr = np.array(mask_img)
     tumor_pixels = arr.mean()
 
-    # Ajustar limiar de acordo com o comportamento da máscara
-    return "provável presença (técnico)" if tumor_pixels > 100 else "provável ausência (técnico)"
+    # Verifique a intensidade média da máscara
+    st.write(f"Média dos pixels da máscara: {tumor_pixels}")
+
+    return "provável presença (técnico)" if tumor_pixels > 40 else "provável ausência (técnico)
 
 # ======================================================
 # 7. Interface Streamlit
