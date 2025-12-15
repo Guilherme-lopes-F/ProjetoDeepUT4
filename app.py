@@ -88,7 +88,7 @@ def classify_mask(mask_img: Image.Image):
     # Verifique a intensidade média da máscara
     st.write(f"Média dos pixels da máscara: {tumor_pixels}")
 
-    return "provável presença (técnico)" if tumor_pixels > 40 else "provável ausência (técnico)
+    return "provável presença (técnico)" if tumor_pixels > 40 else "provável ausência (técnico)"
 
 # ======================================================
 # 7. Interface Streamlit
