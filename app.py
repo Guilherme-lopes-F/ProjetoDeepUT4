@@ -18,23 +18,36 @@ os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
 
 # ======================================================
-# BANCO DE DADOS (RECRIÁVEL)
+# BANCO SQLITE (AUTO / SEGURO PARA GITHUB + STREAMLIT)
 # ======================================================
 DB_PATH = os.path.join(BASE_DIR, "images.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
+# Tabela base
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS dataset (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     image_path TEXT,
     model_mask_path TEXT,
-    classification TEXT,
-    threshold REAL,
-    activation_mean REAL
+    classification TEXT
 )
 """)
 conn.commit()
+
+# Função para garantir colunas (migração segura)
+def ensure_column(table, column, col_type):
+    cursor.execute(f"PRAGMA table_info({table})")
+    cols = [row[1] for row in cursor.fetchall()]
+    if column not in cols:
+        cursor.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+        )
+        conn.commit()
+
+# Colunas extras
+ensure_column("dataset", "threshold", "REAL")
+ensure_column("dataset", "activation_mean", "REAL")
 
 # ======================================================
 # CARREGAR MODELO
@@ -42,56 +55,45 @@ conn.commit()
 MODEL_PATH = "modelo_sicapv2_unet.h5"
 
 @st.cache_resource
-def load_unet():
+def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return tf.keras.models.load_model(MODEL_PATH, compile=False)
 
-model = load_unet()
+model = load_model()
 
 st.title("🔬 Análise Técnica de Segmentação — U-Net (DEMO)")
 
 if model is None:
-    st.error("❌ Modelo não encontrado")
+    st.error("❌ Modelo U-Net não encontrado")
     st.stop()
 
 st.success("✅ Modelo carregado com sucesso")
 
 # ======================================================
-# SEGMENTAÇÃO
+# FUNÇÕES
 # ======================================================
 def run_unet(img: Image.Image):
     img_resized = img.resize(IMG_SIZE)
     arr = np.array(img_resized, dtype=np.float32) / 255.0
     arr = np.expand_dims(arr, axis=0)
-
     pred = model.predict(arr, verbose=0)[0, :, :, 0]
-
     return pred
 
-# ======================================================
-# CLASSIFICAÇÃO
-# ======================================================
 def classify(mask: np.ndarray):
     ratio = np.sum(mask > 0) / mask.size
     st.write(f"📊 Proporção segmentada: {ratio:.4f}")
-
     return (
         "provável presença (técnico)"
         if ratio > 0.01
         else "provável ausência (técnico)"
     )
 
-# ======================================================
-# OVERLAY
-# ======================================================
 def make_overlay(img: Image.Image, mask: np.ndarray):
     img = img.resize(IMG_SIZE)
     img_np = np.array(img)
-
     overlay = img_np.copy()
     overlay[mask > 0] = [255, 0, 0]
-
     blended = (0.7 * img_np + 0.3 * overlay).astype(np.uint8)
     return Image.fromarray(blended)
 
@@ -111,7 +113,7 @@ if uploaded_file:
 
         pred = run_unet(img)
 
-        # DEBUG REAL
+        # Debug
         st.subheader("🧪 Debug da saída do modelo")
         st.json({
             "min": float(pred.min()),
@@ -124,7 +126,7 @@ if uploaded_file:
             caption="Mapa de probabilidade"
         )
 
-        # THRESHOLD AUTOMÁTICO SEGURO
+        # Threshold automático seguro
         auto_threshold = float(
             np.clip(pred.mean() + 0.05, 0.2, 0.9)
         )
@@ -147,7 +149,7 @@ if uploaded_file:
         classification = classify(mask)
         st.info(f"Resultado técnico: **{classification}**")
 
-        # SALVAR
+        # Salvar arquivos
         img_name = f"{uuid.uuid4()}_{uploaded_file.name}"
         img_path = os.path.join(IMG_DIR, img_name)
         mask_path = os.path.join(MASK_DIR, f"mask_{img_name}")
@@ -155,6 +157,7 @@ if uploaded_file:
         img.save(img_path)
         Image.fromarray(mask).save(mask_path)
 
+        # Inserir no banco (NÃO QUEBRA)
         cursor.execute("""
         INSERT INTO dataset (
             image_path,
@@ -170,6 +173,6 @@ if uploaded_file:
             float(threshold),
             float(pred.mean())
         ))
-
         conn.commit()
+
         st.success("✅ Resultado salvo com sucesso")
