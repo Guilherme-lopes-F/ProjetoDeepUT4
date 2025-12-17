@@ -1,4 +1,5 @@
-# Projeto DeepUT4
+<h1>[Projeto DeepUT4](https://projetodeeput4.streamlit.app/)</h1>
+
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow&logoColor=white)
@@ -48,6 +49,12 @@ Este projeto foi desenvolvido com o objetivo de testar um modelo de Inteligênci
 
 ---
 
+[Matheus Henrique](https://github.com/matheushenrique408)
+
+**Atividades:**
+- Criação do Artigo
+
+---
 ## 🛠️ Tecnologias Utilizadas
 - Python  
 - TensorFlow / Keras  
