@@ -1,4 +1,5 @@
-<h1>[Projeto DeepUT4](https://projetodeeput4.streamlit.app/)</h1>
+<h1>Projeto DeepUT4</h1>
+https://projetodeeput4.streamlit.app/
 
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white)
